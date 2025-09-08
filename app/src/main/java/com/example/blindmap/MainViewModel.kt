@@ -30,10 +30,7 @@ import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
-import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.MarkerOptions
-import com.google.android.gms.maps.model.PolylineOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.objects.ObjectDetection
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
@@ -52,10 +49,10 @@ import java.util.concurrent.Executors
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
     private val TAG = this::class.java.simpleName
     private val fusedLocationClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(application)
-    private var tts: TextToSpeech = TextToSpeech(application, this)
-    private var speechRecognizer: SpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
+    private lateinit var tts: TextToSpeech
+    private lateinit var speechRecognizer: SpeechRecognizer
     private val client = OkHttpClient()
-    private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private lateinit var cameraExecutor: ExecutorService
     private var isCameraStarted = false
     private var isMoving = false
     private lateinit var locationCallback: LocationCallback
@@ -63,6 +60,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private var pendingAddress: String? = null
     private var isConfirming: Boolean = false
     private var currentLatLng: LatLng? = null
+    private val _isNavigating = MutableLiveData<Boolean>(false)
+    val isNavigating: LiveData<Boolean> get() = _isNavigating
 
     private val _speechResult = MutableLiveData<String>()
     val speechResult: LiveData<String> get() = _speechResult
@@ -73,6 +72,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _mapUpdate = MutableLiveData<MapUpdate>()
     val mapUpdate: LiveData<MapUpdate> get() = _mapUpdate
 
+    private val _navigationButtonText = MutableLiveData<String>("Bắt đầu dẫn đường")
+    val navigationButtonText: LiveData<String> get() = _navigationButtonText
+
     data class MapUpdate(
         val latLng: LatLng? = null,
         val markerTitle: String? = null,
@@ -81,6 +83,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     )
 
     init {
+        tts = TextToSpeech(application, this)
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
+        cameraExecutor = Executors.newSingleThreadExecutor()
         setupLocationUpdates()
     }
 
@@ -89,32 +94,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val spokenText = results?.firstOrNull()?.lowercase() ?: ""
         if (isConfirming) {
             if (spokenText.contains("có")) {
-                _ttsMessage.value = "Đã xác nhận. Bắt đầu tìm đường đến ${pendingAddress}."
+                _ttsMessage.setValue("Đã xác nhận. Bắt đầu tìm đường đến ${pendingAddress}.")
                 isConfirming = false
+                _isNavigating.setValue(true)
+                _navigationButtonText.setValue("Dừng dẫn đường")
                 pendingAddress?.let { getCoordinatesFromAddress(it) }
             } else if (spokenText.contains("không")) {
-                _ttsMessage.value = "Vui lòng nói lại địa chỉ."
+                _ttsMessage.setValue("Vui lòng nói lại địa chỉ.")
                 isConfirming = false
                 pendingAddress = null
-                _speechResult.value = "start_recognition"
+                _speechResult.setValue("start_recognition")
             } else {
-                _ttsMessage.value = "Không nhận diện được. Nói 'có' hoặc 'không'."
-                _speechResult.value = "start_confirmation"
+                _ttsMessage.setValue("Không nhận diện được. Nói 'có' hoặc 'không'.")
+                _speechResult.setValue("start_confirmation")
             }
         } else {
             if (spokenText.isNotEmpty()) {
                 pendingAddress = spokenText
-                _ttsMessage.value = "Bạn muốn đến $spokenText phải không? Nói 'có' để tiếp tục hoặc 'không' để nói lại."
+                _ttsMessage.setValue("Bạn muốn đến $spokenText phải không? Nói 'có' để tiếp tục hoặc 'không' để nói lại.")
                 isConfirming = true
-                _speechResult.value = "start_confirmation"
+                _speechResult.setValue("start_confirmation")
             } else {
-                _ttsMessage.value = "Không nhận diện được giọng nói. Vui lòng nói lại."
-                _speechResult.value = "start_recognition"
+                _ttsMessage.setValue("Không nhận diện được giọng nói. Vui lòng nói lại.")
+                _speechResult.setValue("start_recognition")
             }
         }
-    }
-    fun onCameraPermissionDenied() {
-        _ttsMessage.value = "Quyền truy cập camera bị từ chối. Không thể phát hiện vật cản."
     }
 
     fun startSpeechRecognition(): Intent {
@@ -137,13 +141,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         return ActivityCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
+    fun onCameraPermissionDenied() {
+        _ttsMessage.setValue("Quyền truy cập camera bị từ chối. Không thể phát hiện vật cản.")
+    }
+
     fun getCurrentLocation() {
         if (checkLocationPermission(getApplication())) {
             fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 location?.let {
                     currentLatLng = LatLng(it.latitude, it.longitude)
-                    _mapUpdate.value = MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại")
-                    _ttsMessage.value = "Vị trí hiện tại: ${it.latitude}, ${it.longitude}"
+                    _mapUpdate.setValue(MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại"))
+                    _ttsMessage.setValue("Vị trí hiện tại: ${it.latitude}, ${it.longitude}")
                 }
             }
         }
@@ -155,7 +163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 val lastLocation = locationResult.lastLocation ?: return
                 isMoving = lastLocation.speed > 0.5f
                 if (isMoving && !isCameraStarted) {
-                    _speechResult.value = "request_camera_permission"
+                    _speechResult.setValue("request_camera_permission")
                 } else if (!isMoving && isCameraStarted) {
                     stopCamera()
                 }
@@ -174,9 +182,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    fun stopNavigation() {
+        if (checkLocationPermission(getApplication())) {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        }
+        if (isCameraStarted) {
+            stopCamera()
+        }
+        pendingAddress = null
+        isConfirming = false
+        _isNavigating.setValue(false)
+        _navigationButtonText.setValue("Bắt đầu dẫn đường")
+        _mapUpdate.setValue(MapUpdate(clearMap = true))
+        _ttsMessage.setValue("Đã dừng dẫn đường.")
+        // Re-add current location marker after stopping navigation
+        currentLatLng?.let {
+            _mapUpdate.setValue(MapUpdate(latLng = it, markerTitle = "Vị trí hiện tại"))
+        }
+    }
+
     fun startCamera(context: Context, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         if (!checkCameraPermission(context)) {
-            _speechResult.value = "request_camera_permission"
+            _speechResult.setValue("request_camera_permission")
             return
         }
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -204,10 +231,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
                 isCameraStarted = true
-                _ttsMessage.value = "Bắt đầu phát hiện vật cản."
+                _ttsMessage.setValue("Bắt đầu phát hiện vật cản.")
             } catch (e: Exception) {
                 Log.e("CameraX", "Lỗi camera: ${e.message}")
-                _ttsMessage.value = "Lỗi khởi động camera."
+                _ttsMessage.setValue("Lỗi khởi động camera.")
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -218,7 +245,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             val cameraProvider = cameraProviderFuture.get()
             cameraProvider.unbindAll()
             isCameraStarted = false
-            _ttsMessage.value = "Đã dừng phát hiện vật cản."
+            _ttsMessage.setValue("Đã dừng phát hiện vật cản.")
         }, ContextCompat.getMainExecutor(getApplication()))
     }
 
@@ -260,30 +287,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         val boxArea = boundingBox.width() * boundingBox.height()
                         val imageArea = bitmap.width * bitmap.height
                         val isClose = boxArea > 0.3 * imageArea
-                        _ttsMessage.value = if (isClose) {
-                            "Cảnh báo: $label ở gần phía trước. Hãy cẩn thận!"
-                        } else {
-                            "Phát hiện $label phía trước."
-                        }
+                        _ttsMessage.setValue(
+                            if (isClose) {
+                                "Cảnh báo: $label ở gần phía trước. Hãy cẩn thận!"
+                            } else {
+                                "Phát hiện $label phía trước."
+                            }
+                        )
                     }
                 }
                 if (!hasObstacle) {
-                    _ttsMessage.value = "Không phát hiện vật cản phía trước."
+                    _ttsMessage.setValue("Không phát hiện vật cản phía trước.")
                 }
             }
             .addOnFailureListener { e ->
                 Log.e("MLKit", "Lỗi phát hiện đối tượng: ${e.message}")
-                _ttsMessage.value = "Lỗi: Không thể phát hiện vật thể. Vui lòng thử lại."
+                _ttsMessage.setValue("Lỗi: Không thể phát hiện vật thể. Vui lòng thử lại.")
             }
     }
 
-    private fun getCoordinatesFromAddress(address: String) {
+    fun getCoordinatesFromAddress(address: String) {
         val encodedAddress = address.replace(" ", "+")
         val url = "https://maps.track-asia.com/api/v2/geocode/json?address=$encodedAddress&key=public_key"
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                _ttsMessage.value = "Không thể tìm vị trí. Vui lòng thử lại."
+                _ttsMessage.postValue("Không thể tìm vị trí. Vui lòng thử lại.")
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -297,13 +326,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         val lat = location.getDouble("lat")
                         val lng = location.getDouble("lng")
                         val destLatLng = LatLng(lat, lng)
-                        _mapUpdate.value = MapUpdate(clearMap = true)
-                        _mapUpdate.value = MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại")
-                        _mapUpdate.value = MapUpdate(latLng = destLatLng, markerTitle = "Đích đến: $address")
-                        _ttsMessage.value = "Đã tìm thấy $address tại tọa độ $lat, $lng. Bắt đầu tìm đường."
+                        _mapUpdate.postValue(MapUpdate(clearMap = true))
+                        _mapUpdate.postValue(MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại"))
+                        _mapUpdate.postValue(MapUpdate(latLng = destLatLng, markerTitle = "Đích đến: $address"))
+                        _ttsMessage.postValue("Đã tìm thấy $address tại tọa độ $lat, $lng. Bắt đầu tìm đường.")
                         getDirections(currentLatLng!!, destLatLng)
                     } else {
-                        _ttsMessage.value = "Không tìm thấy địa chỉ. Vui lòng thử lại."
+                        _ttsMessage.postValue("Không tìm thấy địa chỉ. Vui lòng thử lại.")
                     }
                 }
             }
@@ -320,13 +349,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                _ttsMessage.value = "Lỗi tìm đường. Vui lòng thử lại."
+                _ttsMessage.postValue("Lỗi tìm đường. Vui lòng thử lại.")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.body?.string()?.let { jsonString ->
                     val json = JSONObject(jsonString)
                     if (json.getString("status") == "OK") {
+                        // Clear the map before adding new markers and polyline
+                        _mapUpdate.postValue(MapUpdate(clearMap = true))
+                        // Re-add current location and destination markers
+                        _mapUpdate.postValue(MapUpdate(latLng = origin, markerTitle = "Vị trí hiện tại"))
+                        _mapUpdate.postValue(MapUpdate(latLng = destination, markerTitle = "Đích đến"))
                         val routes = json.getJSONArray("routes")
                         val overviewPolyline = routes.getJSONObject(0).getJSONObject("overview_polyline").getString("points")
                         val points = decodePolyline(overviewPolyline)
@@ -350,10 +384,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                             }
                             instructionsBuilder.append("Bước ${i + 1}: $maneuverText $cleanInstructions sau $distanceText, đi trong $durationText. ")
                         }
-                        _mapUpdate.value = MapUpdate(polylinePoints = points)
-                        _ttsMessage.value = "Đã vẽ đường đi đến đích. ${instructionsBuilder.toString()}"
+                        _mapUpdate.postValue(MapUpdate(polylinePoints = points))
+                        _ttsMessage.postValue("Đã vẽ đường đi đến đích. ${instructionsBuilder.toString()}")
                     } else {
-                        _ttsMessage.value = "Không tìm thấy đường đi."
+                        _ttsMessage.postValue("Không tìm thấy đường đi.")
                     }
                 }
             }
@@ -398,7 +432,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 Log.e("TTS", "Ngôn ngữ không hỗ trợ")
             } else {
-                _ttsMessage.value = "Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường."
+                _ttsMessage.setValue("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.")
             }
         }
     }

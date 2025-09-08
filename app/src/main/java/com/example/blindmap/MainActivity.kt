@@ -48,17 +48,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             insets
         }
 
-        viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+        viewModel = ViewModelProvider(this).get(MainViewModel::class.java)
 
         val mapFragment = supportFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
         mapFragment.getMapAsync(this)
 
         binding.startNavigationButton.setOnClickListener {
-            if (!viewModel.checkLocationPermission(this)) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
+            if (viewModel.isNavigating.value == true) {
+                viewModel.stopNavigation()
             } else {
-                viewModel.getCurrentLocation()
-                viewModel.startLocationUpdates()
+                if (!viewModel.checkLocationPermission(this)) {
+                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
+                } else {
+                    viewModel.getCurrentLocation()
+                    viewModel.startLocationUpdates()
+                }
             }
         }
 
@@ -71,7 +75,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         viewModel.ttsMessage.observe(this) { message ->
-            // Handle TTS output (already handled in ViewModel)
         }
 
         viewModel.speechResult.observe(this) { action ->
@@ -100,6 +103,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 map.addPolyline(polylineOptions)
             }
         }
+
+        viewModel.navigationButtonText.observe(this) { text ->
+            binding.startNavigationButton.text = text
+        }
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -108,6 +115,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         if (viewModel.checkLocationPermission(this)) {
             viewModel.getCurrentLocation()
             viewModel.startLocationUpdates()
+            // Remove hardcoded address call to avoid automatic navigation
+            // viewModel.getCoordinatesFromAddress("50 mễ trì thượng")
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
         }
