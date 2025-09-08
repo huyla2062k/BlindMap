@@ -54,6 +54,7 @@ import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnInitListener {
+    val TAG = this::class.java.simpleName
     private lateinit var map: GoogleMap
     private lateinit var binding: ActivityMainBinding
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -307,7 +308,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
 
     private fun getCoordinatesFromAddress(address: String) {
         val encodedAddress = address.replace(" ", "+")
-        val url = "https://maps.googleapis.com/maps/api/geocode/json?address=$encodedAddress&key=YOUR_API_KEY_HERE"
+        Log.d(TAG, "getCoordinatesFromAddress: encodedAddress")
+        val url = "https://maps.track-asia.com/api/v2/geocode/json?address=$encodedAddress&key=public_key"
+        Log.d(TAG, "getCoordinatesFromAddress: $url")
+
         val request = Request.Builder().url(url).build()
 
         client.newCall(request).enqueue(object : Callback {
@@ -322,6 +326,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
             override fun onResponse(call: Call, response: Response) {
                 response.body?.string()?.let { jsonString ->
                     val json = JSONObject(jsonString)
+                    Log.d(TAG, "onResponse: $json")
                     if (json.getString("status") == "OK") {
                         val location = json.getJSONArray("results")
                             .getJSONObject(0)
@@ -329,9 +334,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
                             .getJSONObject("location")
                         val lat = location.getDouble("lat")
                         val lng = location.getDouble("lng")
+                        Log.d(TAG, "onResponse: $lat      $lng")
                         runOnUiThread {
                             val destLatLng = LatLng(lat, lng)
                             map.clear()  // Xóa các đường cũ
+                            Log.d(TAG, "onResponse: $currentLatLng  $destLatLng")
                             map.addMarker(MarkerOptions().position(currentLatLng!!).title("Vị trí hiện tại"))
                             map.addMarker(MarkerOptions().position(destLatLng).title("Đích đến: $address"))
                             map.moveCamera(CameraUpdateFactory.newLatLngZoom(destLatLng, 15f))
@@ -397,12 +404,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
     }
 
     fun getDirections(origin: LatLng, destination: LatLng) {
-        val url = "https://maps.googleapis.com/maps/api/directions/json?" +
+        val url = "https://maps.track-asia.com/route/v2/directions/json?" +
                 "origin=${origin.latitude},${origin.longitude}" +
                 "&destination=${destination.latitude},${destination.longitude}" +
                 "&mode=walking" +  // Chế độ đi bộ
                 "&language=vi" +   // Ngôn ngữ tiếng Việt để text phù hợp
-                "&key=YOUR_API_KEY_HERE"
+                "&key=public_key"
+        Log.d(TAG, "getDirections: $url")
 
         val request = Request.Builder().url(url).build()
 
