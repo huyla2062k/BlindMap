@@ -195,8 +195,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
                 location?.let {
                     currentLatLng = LatLng(it.latitude, it.longitude)  // Lưu vị trí hiện tại
                     map.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng!!, 15f))
-                    binding.locationText.text = "Vị trí hiện tại: ${it.latitude}, ${it.longitude}"
-                    binding.locationText.contentDescription = "Vị trí hiện tại: ${it.latitude}, ${it.longitude}"
+                    map.addMarker(MarkerOptions().position(currentLatLng!!).title("Vị trí hiện tại"))
+
                     tts.speak("Vị trí hiện tại: ${it.latitude}, ${it.longitude}", TextToSpeech.QUEUE_FLUSH, null, null)
                 }
             }
@@ -317,8 +317,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
-                    binding.locationText.text = "Lỗi: Không thể tìm vị trí"
-                    binding.locationText.contentDescription = "Lỗi: Không thể tìm vị trí"
+
                     tts.speak("Không thể tìm vị trí. Vui lòng thử lại.", TextToSpeech.QUEUE_FLUSH, null, null)
                 }
             }
@@ -342,8 +341,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
                             map.addMarker(MarkerOptions().position(currentLatLng!!).title("Vị trí hiện tại"))
                             map.addMarker(MarkerOptions().position(destLatLng).title("Đích đến: $address"))
                             map.moveCamera(CameraUpdateFactory.newLatLngZoom(destLatLng, 15f))
-                            binding.locationText.text = "Đích đến: $address ($lat, $lng)"
-                            binding.locationText.contentDescription = "Đích đến: $address ($lat, $lng)"
+
                             tts.speak("Đã tìm thấy $address tại tọa độ $lat, $lng. Bắt đầu tìm đường.", TextToSpeech.QUEUE_FLUSH, null, null)
 
                             // Gọi tìm đường
@@ -351,8 +349,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
                         }
                     } else {
                         runOnUiThread {
-                            binding.locationText.text = "Không tìm thấy địa chỉ"
-                            binding.locationText.contentDescription = "Không tìm thấy địa chỉ"
+
                             tts.speak("Không tìm thấy địa chỉ. Vui lòng thử lại.", TextToSpeech.QUEUE_FLUSH, null, null)
                         }
                     }
@@ -521,8 +518,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnIni
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale("vi_VN"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                binding.locationText.text = "Lỗi: Ngôn ngữ không hỗ trợ"
-                binding.locationText.contentDescription = "Lỗi: Ngôn ngữ không hỗ trợ"
                 Log.e("TTS", "Ngôn ngữ không hỗ trợ")
             } else {
                 tts.speak("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.", TextToSpeech.QUEUE_FLUSH, null, null)
