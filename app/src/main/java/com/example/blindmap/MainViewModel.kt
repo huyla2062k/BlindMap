@@ -39,6 +39,7 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -60,7 +61,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private var pendingAddress: String? = null
     private var isConfirming: Boolean = false
     private var currentLatLng: LatLng? = null
+
+
+    private var currentStepIndex = 0
+    var navigationSteps: JSONArray? = null // Lưu trữ danh sách các bước dẫn đường
+    private val _isActivelyNavigating = MutableLiveData<Boolean>(false)
+    val isActivelyNavigating: LiveData<Boolean> get() = _isActivelyNavigating
+
+
     private val _isNavigating = MutableLiveData<Boolean>(false)
+
+
     val isNavigating: LiveData<Boolean> get() = _isNavigating
 
     private val _speechResult = MutableLiveData<String>()
@@ -120,7 +131,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
         }
     }
+    fun startActiveNavigation(steps: JSONArray) {
+        navigationSteps = steps
+        currentStepIndex = 0
+        _isActivelyNavigating.setValue(true)
+        _navigationButtonText.setValue("Dừng dẫn đường")
+        provideNextStepInstruction()
+    }
 
+    // Hàm để cung cấp hướng dẫn cho bước hiện tại
+    private fun provideNextStepInstruction() {
+        navigationSteps?.let { steps ->
+            if (currentStepIndex < steps.length()) {
+                val step = steps.getJSONObject(currentStepIndex)
+                val htmlInstructions = step.getString("html_instructions")
+                val cleanInstructions = android.text.Html.fromHtml(htmlInstructions).toString()
+                val distanceText = step.getJSONObject("distance").getString("text")
+                val durationText = step.getJSONObject("duration").getString("text")
+                val maneuver = if (step.has("maneuver")) step.getString("maneuver") else ""
+                val maneuverText = when (maneuver) {
+                    "turn-left" -> "Rẽ trái"
+                    "turn-right" -> "Rẽ phải"
+                    "keep-left" -> "Giữ bên trái"
+                    "keep-right" -> "Giữ bên phải"
+                    "straight" -> "Đi thẳng"
+                    else -> ""
+                }
+                _ttsMessage.setValue("Bước ${currentStepIndex + 1}: $maneuverText $cleanInstructions sau $distanceText, đi trong $durationText.")
+            } else {
+                _ttsMessage.setValue("Bạn đã đến đích!")
+                stopNavigation()
+            }
+        }
+    }
     fun startSpeechRecognition(): Intent {
         return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -162,6 +205,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             override fun onLocationResult(locationResult: LocationResult) {
                 val lastLocation = locationResult.lastLocation ?: return
                 isMoving = lastLocation.speed > 0.5f
+                currentLatLng = LatLng(lastLocation.latitude, lastLocation.longitude)
+                _mapUpdate.setValue(MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại"))
+
+                if (_isActivelyNavigating.value == true) {
+                    // Kiểm tra nếu người dùng đã đến gần điểm cuối của bước hiện tại
+                    navigationSteps?.let { steps ->
+                        if (currentStepIndex < steps.length()) {
+                            val step = steps.getJSONObject(currentStepIndex)
+                            val endLocation = step.getJSONObject("end_location")
+                            val endLat = endLocation.getDouble("lat")
+                            val endLng = endLocation.getDouble("lng")
+                            val endLatLng = LatLng(endLat, endLng)
+
+                            val distanceToEnd = FloatArray(1)
+                            Location.distanceBetween(
+                                currentLatLng!!.latitude, currentLatLng!!.longitude,
+                                endLat, endLng, distanceToEnd
+                            )
+
+                            if (distanceToEnd[0] < 10f) { // Nếu cách điểm cuối bước < 10 mét
+                                currentStepIndex++
+                                provideNextStepInstruction()
+                            }
+                        }
+                    }
+                }
+
                 if (isMoving && !isCameraStarted) {
                     _speechResult.setValue("request_camera_permission")
                 } else if (!isMoving && isCameraStarted) {
@@ -183,22 +253,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     fun stopNavigation() {
+        Log.d("MainViewModel", "Stopping navigation")
         if (checkLocationPermission(getApplication())) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
+            Log.d("MainViewModel", "Location updates stopped")
         }
         if (isCameraStarted) {
             stopCamera()
+            Log.d("MainViewModel", "Camera stopped")
         }
         pendingAddress = null
         isConfirming = false
-        _isNavigating.setValue(false)
-        _navigationButtonText.setValue("Bắt đầu dẫn đường")
-        _mapUpdate.setValue(MapUpdate(clearMap = true))
-        _ttsMessage.setValue("Đã dừng dẫn đường.")
-        // Re-add current location marker after stopping navigation
-        currentLatLng?.let {
-            _mapUpdate.setValue(MapUpdate(latLng = it, markerTitle = "Vị trí hiện tại"))
-        }
+        navigationSteps = null
+        currentStepIndex = 0
+        _isNavigating.postValue(false)
+        _isActivelyNavigating.postValue(false)
+        _navigationButtonText.postValue("Bắt đầu dẫn đường")
+        // Xóa bản đồ và thêm lại marker vị trí hiện tại trong cùng một cập nhật
+        _mapUpdate.postValue(MapUpdate(
+            clearMap = true,
+            latLng = currentLatLng,
+            markerTitle = currentLatLng?.let { "Vị trí hiện tại" }
+        ))
+        _ttsMessage.postValue("Đã dừng dẫn đường.")
+        Log.d("MainViewModel", "Map cleared and navigation stopped")
     }
 
     fun startCamera(context: Context, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
@@ -356,36 +434,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 response.body?.string()?.let { jsonString ->
                     val json = JSONObject(jsonString)
                     if (json.getString("status") == "OK") {
-                        // Clear the map before adding new markers and polyline
                         _mapUpdate.postValue(MapUpdate(clearMap = true))
-                        // Re-add current location and destination markers
                         _mapUpdate.postValue(MapUpdate(latLng = origin, markerTitle = "Vị trí hiện tại"))
                         _mapUpdate.postValue(MapUpdate(latLng = destination, markerTitle = "Đích đến"))
                         val routes = json.getJSONArray("routes")
                         val overviewPolyline = routes.getJSONObject(0).getJSONObject("overview_polyline").getString("points")
                         val points = decodePolyline(overviewPolyline)
                         val legs = routes.getJSONObject(0).getJSONArray("legs")
-                        val steps = legs.getJSONObject(0).getJSONArray("steps")
-                        val instructionsBuilder = StringBuilder("Hướng dẫn chi tiết: ")
-                        for (i in 0 until steps.length()) {
-                            val step = steps.getJSONObject(i)
-                            val htmlInstructions = step.getString("html_instructions")
-                            val cleanInstructions = android.text.Html.fromHtml(htmlInstructions).toString()
-                            val distanceText = step.getJSONObject("distance").getString("text")
-                            val durationText = step.getJSONObject("duration").getString("text")
-                            val maneuver = if (step.has("maneuver")) step.getString("maneuver") else ""
-                            val maneuverText = when (maneuver) {
-                                "turn-left" -> "Rẽ trái"
-                                "turn-right" -> "Rẽ phải"
-                                "keep-left" -> "Giữ bên trái"
-                                "keep-right" -> "Giữ bên phải"
-                                "straight" -> "Đi thẳng"
-                                else -> ""
-                            }
-                            instructionsBuilder.append("Bước ${i + 1}: $maneuverText $cleanInstructions sau $distanceText, đi trong $durationText. ")
-                        }
+                        navigationSteps = legs.getJSONObject(0).getJSONArray("steps") // Lưu trữ steps
                         _mapUpdate.postValue(MapUpdate(polylinePoints = points))
-                        _ttsMessage.postValue("Đã vẽ đường đi đến đích. ${instructionsBuilder.toString()}")
+                        _ttsMessage.postValue("Đã vẽ đường đi đến đích. Nhấn 'Bắt đầu dẫn đường' để tiếp tục.")
+                        _isNavigating.postValue(true) // Sử dụng postValue thay vì setValue
                     } else {
                         _ttsMessage.postValue("Không tìm thấy đường đi.")
                     }

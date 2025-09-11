@@ -3,6 +3,7 @@ package com.example.blindmap
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +18,7 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
 import androidx.core.app.ActivityCompat
+import org.json.JSONArray
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var binding: ActivityMainBinding
@@ -54,9 +56,15 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         mapFragment.getMapAsync(this)
 
         binding.startNavigationButton.setOnClickListener {
-            if (viewModel.isNavigating.value == true) {
+            Log.d("MainActivity", "Navigation button clicked, isActivelyNavigating: ${viewModel.isActivelyNavigating.value}, isNavigating: ${viewModel.isNavigating.value}")
+            if (viewModel.isActivelyNavigating.value == true) {
+                Log.d("MainActivity", "Stopping navigation")
                 viewModel.stopNavigation()
+            } else if (viewModel.isNavigating.value == true) {
+                Log.d("MainActivity", "Starting active navigation")
+                viewModel.startActiveNavigation(viewModel.navigationSteps ?: JSONArray())
             } else {
+                Log.d("MainActivity", "Requesting location permission or starting location updates")
                 if (!viewModel.checkLocationPermission(this)) {
                     ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
                 } else {
@@ -116,7 +124,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             viewModel.getCurrentLocation()
             viewModel.startLocationUpdates()
             // Remove hardcoded address call to avoid automatic navigation
-            // viewModel.getCoordinatesFromAddress("50 mễ trì thượng")
+             viewModel.getCoordinatesFromAddress("50 mễ trì thượng")
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
         }
