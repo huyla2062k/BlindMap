@@ -16,6 +16,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -50,195 +51,181 @@ import java.util.concurrent.Executors
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
     private val TAG = this::class.java.simpleName
     private val fusedLocationClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(application)
-    private lateinit var tts: TextToSpeech
-    private lateinit var speechRecognizer: SpeechRecognizer
+    private var tts: TextToSpeech = TextToSpeech(application, this)
+    private var speechRecognizer: SpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
     private val client = OkHttpClient()
     private lateinit var cameraExecutor: ExecutorService
     private var isCameraStarted = false
     private var isMoving = false
     private lateinit var locationCallback: LocationCallback
-    private var lastAnalysisTime: Long = 0L
-    private var pendingAddress: String? = null
-    private var isConfirming: Boolean = false
-    private var currentLatLng: LatLng? = null
-
-
-    private var currentStepIndex = 0
-    var navigationSteps: JSONArray? = null // Lưu trữ danh sách các bước dẫn đường
+    private val _ttsMessage = MutableLiveData<String>("")
+    private val _speechResult = MutableLiveData<String>("")
+    private val _mapUpdate = MutableLiveData<MapUpdate>()
+    private val _navigationButtonText = MutableLiveData<String>("Bắt đầu dẫn đường")
+    private val _isNavigating = MutableLiveData<Boolean>(false)
     private val _isActivelyNavigating = MutableLiveData<Boolean>(false)
+    var navigationSteps: JSONArray? = null
+
+    val ttsMessage: LiveData<String> get() = _ttsMessage
+    val speechResult: LiveData<String> get() = _speechResult
+    val mapUpdate: LiveData<MapUpdate> get() = _mapUpdate
+    val navigationButtonText: LiveData<String> get() = _navigationButtonText
+    val isNavigating: LiveData<Boolean> get() = _isNavigating
     val isActivelyNavigating: LiveData<Boolean> get() = _isActivelyNavigating
 
-
-    private val _isNavigating = MutableLiveData<Boolean>(false)
-
-
-    val isNavigating: LiveData<Boolean> get() = _isNavigating
-
-    private val _speechResult = MutableLiveData<String>()
-    val speechResult: LiveData<String> get() = _speechResult
-
-    private val _ttsMessage = MutableLiveData<String>()
-    val ttsMessage: LiveData<String> get() = _ttsMessage
-
-    private val _mapUpdate = MutableLiveData<MapUpdate>()
-    val mapUpdate: LiveData<MapUpdate> get() = _mapUpdate
-
-    private val _navigationButtonText = MutableLiveData<String>("Bắt đầu dẫn đường")
-    val navigationButtonText: LiveData<String> get() = _navigationButtonText
-
-    data class MapUpdate(
-        val latLng: LatLng? = null,
-        val markerTitle: String? = null,
-        val polylinePoints: List<LatLng>? = null,
-        val clearMap: Boolean = false
-    )
-
     init {
-        tts = TextToSpeech(application, this)
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
         cameraExecutor = Executors.newSingleThreadExecutor()
-        setupLocationUpdates()
+        setupLocationCallback()
     }
 
-    fun handleSpeechResult(result: Intent?) {
-        val results = result?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-        val spokenText = results?.firstOrNull()?.lowercase() ?: ""
-        if (isConfirming) {
-            if (spokenText.contains("có")) {
-                _ttsMessage.setValue("Đã xác nhận. Bắt đầu tìm đường đến ${pendingAddress}.")
-                isConfirming = false
-                _isNavigating.setValue(true)
-                _navigationButtonText.setValue("Dừng dẫn đường")
-                pendingAddress?.let { getCoordinatesFromAddress(it) }
-            } else if (spokenText.contains("không")) {
-                _ttsMessage.setValue("Vui lòng nói lại địa chỉ.")
-                isConfirming = false
-                pendingAddress = null
-                _speechResult.setValue("start_recognition")
-            } else {
-                _ttsMessage.setValue("Không nhận diện được. Nói 'có' hoặc 'không'.")
-                _speechResult.setValue("start_confirmation")
-            }
-        } else {
-            if (spokenText.isNotEmpty()) {
-                pendingAddress = spokenText
-                _ttsMessage.setValue("Bạn muốn đến $spokenText phải không? Nói 'có' để tiếp tục hoặc 'không' để nói lại.")
-                isConfirming = true
-                _speechResult.setValue("start_confirmation")
-            } else {
-                _ttsMessage.setValue("Không nhận diện được giọng nói. Vui lòng nói lại.")
-                _speechResult.setValue("start_recognition")
-            }
-        }
-    }
-    fun startActiveNavigation(steps: JSONArray) {
-        navigationSteps = steps
-        currentStepIndex = 0
-        _isActivelyNavigating.setValue(true)
-        _navigationButtonText.setValue("Dừng dẫn đường")
-        provideNextStepInstruction()
-    }
-
-    // Hàm để cung cấp hướng dẫn cho bước hiện tại
-    private fun provideNextStepInstruction() {
-        navigationSteps?.let { steps ->
-            if (currentStepIndex < steps.length()) {
-                val step = steps.getJSONObject(currentStepIndex)
-                val htmlInstructions = step.getString("html_instructions")
-                val cleanInstructions = android.text.Html.fromHtml(htmlInstructions).toString()
-                val distanceText = step.getJSONObject("distance").getString("text")
-                val durationText = step.getJSONObject("duration").getString("text")
-                val maneuver = if (step.has("maneuver")) step.getString("maneuver") else ""
-                val maneuverText = when (maneuver) {
-                    "turn-left" -> "Rẽ trái"
-                    "turn-right" -> "Rẽ phải"
-                    "keep-left" -> "Giữ bên trái"
-                    "keep-right" -> "Giữ bên phải"
-                    "straight" -> "Đi thẳng"
-                    else -> ""
+    private fun setupLocationCallback() {
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                locationResult.lastLocation?.let { location ->
+                    _mapUpdate.postValue(MapUpdate(latLng = LatLng(location.latitude, location.longitude)))
+                    checkDestinationReached(location)
                 }
-                _ttsMessage.setValue("Bước ${currentStepIndex + 1}: $maneuverText $cleanInstructions sau $distanceText, đi trong $durationText.")
-            } else {
-                _ttsMessage.setValue("Bạn đã đến đích!")
-                stopNavigation()
             }
-        }
-    }
-    fun startSpeechRecognition(): Intent {
-        return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, if (isConfirming) "Nói 'có' hoặc 'không'" else "Hãy nói địa chỉ bạn muốn đến")
         }
     }
 
     fun checkLocationPermission(context: Context): Boolean {
-        return ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 
     fun checkSpeechPermission(context: Context): Boolean {
-        return ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun checkCameraPermission(context: Context): Boolean {
-        return ActivityCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    fun startSpeechRecognition(): Intent {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Nói địa chỉ...")
+        return intent
+    }
+
+    fun handleSpeechResult(data: Intent?) {
+        val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+        if (!results.isNullOrEmpty()) {
+            val spokenText = results[0]
+            _speechResult.postValue("start_confirmation")
+            getCoordinatesFromAddress(spokenText)
+        } else {
+            _speechResult.postValue("start_recognition")
+            _ttsMessage.postValue("Vui lòng nói lại.")
+        }
+    }
+
+    fun getCoordinatesFromAddress(address: String) {
+        val url = "https://api.track-asia.com/geocode/v1/autocomplete?access_token=YOUR_API_KEY&text=$address"
+        val request = Request.Builder().url(url).build()
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Failed to get coordinates: ${e.message} at 09:37 AM +07, 15/09/2025")
+                _ttsMessage.postValue("Không tìm thấy địa chỉ.")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.body?.string()?.let { json ->
+                    val jsonObject = JSONObject(json)
+                    val features = jsonObject.getJSONArray("features")
+                    if (features.length() > 0) {
+                        val geometry = features.getJSONObject(0).getJSONObject("geometry")
+                        val coordinates = geometry.getJSONArray("coordinates")
+                        val latLng = LatLng(coordinates.getDouble(1), coordinates.getDouble(0))
+                        _mapUpdate.postValue(MapUpdate(latLng = latLng, markerTitle = address))
+                        _ttsMessage.postValue("Bạn muốn đến...? Nói 'có' hoặc 'không'.")
+                    } else {
+                        _ttsMessage.postValue("Không tìm thấy địa chỉ.")
+                    }
+                }
+            }
+        })
+    }
+
+    fun startActiveNavigation(steps: JSONArray) {
+        navigationSteps = steps
+        val points = decodePolyline(steps.toString()) // Giả định decode từ steps
+        _mapUpdate.postValue(MapUpdate(clearMap = true))
+        _mapUpdate.postValue(MapUpdate(polylinePoints = points))
+        _ttsMessage.postValue("Đã vẽ đường đi đến đích. Nhấn 'Bắt đầu dẫn đường' để tiếp tục.")
+        _isActivelyNavigating.postValue(true)
+    }
+
+    fun stopNavigation() {
+        _mapUpdate.postValue(MapUpdate(clearMap = true))
+        _ttsMessage.postValue("Đã dừng dẫn đường.")
+        _isActivelyNavigating.postValue(false)
+    }
+
+    fun startCamera(context: Context, activity: AppCompatActivity) {
+        if (!isCameraStarted) {
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                val cameraProvider = cameraProviderFuture.get()
+                val imageAnalyzer = ImageAnalysis.Builder()
+                    .build()
+                    .also { analysis ->
+                        analysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                            processImage(imageProxy)
+                        }
+                    }
+                cameraProvider.bindToLifecycle(activity, CameraSelector.DEFAULT_BACK_CAMERA, imageAnalyzer)
+                isCameraStarted = true
+                Log.d(TAG, "Camera started at 09:42 AM +07, 15/09/2025")
+            }, cameraExecutor)
+        }
+    }
+
+    private fun processImage(imageProxy: ImageProxy) {
+        val image = imageProxy.image
+        if (image != null) {
+            val yPlane = image.planes[0]
+            val buffer = yPlane.buffer
+            val byteArray = ByteArray(buffer.remaining())
+            buffer.get(byteArray) // Đọc dữ liệu từ ByteBuffer vào ByteArray
+            val yuvImage = YuvImage(
+                byteArray,
+                ImageFormat.NV21,
+                image.width,
+                image.height,
+                null
+            )
+            val stream = ByteArrayOutputStream()
+            yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, stream)
+            val bitmap = BitmapFactory.decodeByteArray(stream.toByteArray(), 0, stream.size())
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val options = ObjectDetectorOptions.Builder()
+                .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+                .enableClassification()
+                .build()
+            val detector = ObjectDetection.getClient(options)
+            detector.process(inputImage)
+                .addOnSuccessListener { objects ->
+                    handleObjects(objects)
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Object detection failed: ${e.message} at 09:42 AM +07, 15/09/2025")
+                }
+            imageProxy.close()
+        }
+    }
+
+    private fun handleObjects(objects: List<com.google.mlkit.vision.objects.DetectedObject>) {
+        if (isMoving) {
+            val message = when {
+                objects.isNotEmpty() -> "Cảnh báo: ${objects[0].labels.firstOrNull()?.text} ở gần!"
+                else -> "Không phát hiện vật cản."
+            }
+            _ttsMessage.postValue(message)
+            Log.d(TAG, "Object detection result: $message at 09:37 AM +07, 15/09/2025")
+        }
     }
 
     fun onCameraPermissionDenied() {
-        _ttsMessage.setValue("Quyền truy cập camera bị từ chối. Không thể phát hiện vật cản.")
-    }
-
-    fun getCurrentLocation() {
-        if (checkLocationPermission(getApplication())) {
-            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-                location?.let {
-                    currentLatLng = LatLng(it.latitude, it.longitude)
-                    _mapUpdate.setValue(MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại"))
-                    _ttsMessage.setValue("Vị trí hiện tại: ${it.latitude}, ${it.longitude}")
-                }
-            }
-        }
-    }
-
-    private fun setupLocationUpdates() {
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                val lastLocation = locationResult.lastLocation ?: return
-                isMoving = lastLocation.speed > 0.5f
-                currentLatLng = LatLng(lastLocation.latitude, lastLocation.longitude)
-                _mapUpdate.setValue(MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại"))
-
-                if (_isActivelyNavigating.value == true) {
-                    // Kiểm tra nếu người dùng đã đến gần điểm cuối của bước hiện tại
-                    navigationSteps?.let { steps ->
-                        if (currentStepIndex < steps.length()) {
-                            val step = steps.getJSONObject(currentStepIndex)
-                            val endLocation = step.getJSONObject("end_location")
-                            val endLat = endLocation.getDouble("lat")
-                            val endLng = endLocation.getDouble("lng")
-                            val endLatLng = LatLng(endLat, endLng)
-
-                            val distanceToEnd = FloatArray(1)
-                            Location.distanceBetween(
-                                currentLatLng!!.latitude, currentLatLng!!.longitude,
-                                endLat, endLng, distanceToEnd
-                            )
-
-                            if (distanceToEnd[0] < 10f) { // Nếu cách điểm cuối bước < 10 mét
-                                currentStepIndex++
-                                provideNextStepInstruction()
-                            }
-                        }
-                    }
-                }
-
-                if (isMoving && !isCameraStarted) {
-                    _speechResult.setValue("request_camera_permission")
-                } else if (!isMoving && isCameraStarted) {
-                    stopCamera()
-                }
-            }
-        }
+        _ttsMessage.postValue("Quyền camera bị từ chối. Vui lòng cấp quyền.")
+        Log.w(TAG, "Camera permission denied at 09:37 AM +07, 15/09/2025")
     }
 
     fun startLocationUpdates() {
@@ -249,208 +236,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 priority = LocationRequest.PRIORITY_HIGH_ACCURACY
             }
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null)
+            Log.d(TAG, "Location updates started at 09:37 AM +07, 15/09/2025")
         }
     }
 
-    fun stopNavigation() {
-        Log.d("MainViewModel", "Stopping navigation")
+    fun getCurrentLocation() {
         if (checkLocationPermission(getApplication())) {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
-            Log.d("MainViewModel", "Location updates stopped")
+            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                location?.let {
+                    _mapUpdate.postValue(MapUpdate(latLng = LatLng(it.latitude, it.longitude)))
+                    Log.d(TAG, "Current location fetched at 09:37 AM +07, 15/09/2025: ${it.latitude}, ${it.longitude}")
+                }
+            }
         }
+    }
+
+    private fun checkDestinationReached(location: Location) {
+        navigationSteps?.let { steps ->
+            // Logic kiểm tra đích (giả định đơn giản)
+            if (steps.length() > 0) {
+                val lastStep = steps.getJSONObject(steps.length() - 1)
+                val destLat = lastStep.getJSONObject("end_location").getDouble("lat")
+                val destLng = lastStep.getJSONObject("end_location").getDouble("lng")
+                val distance = FloatArray(1)
+                Location.distanceBetween(location.latitude, location.longitude, destLat, destLng, distance)
+                if (distance[0] < 10) { // 10 mét
+                    _ttsMessage.postValue("Đã đến đích.")
+                    stopNavigation()
+                }
+            }
+        }
+    }
+
+    fun stopCamera() {
         if (isCameraStarted) {
-            stopCamera()
-            Log.d("MainViewModel", "Camera stopped")
-        }
-        pendingAddress = null
-        isConfirming = false
-        navigationSteps = null
-        currentStepIndex = 0
-        _isNavigating.postValue(false)
-        _isActivelyNavigating.postValue(false)
-        _navigationButtonText.postValue("Bắt đầu dẫn đường")
-        // Xóa bản đồ và thêm lại marker vị trí hiện tại trong cùng một cập nhật
-        _mapUpdate.postValue(MapUpdate(
-            clearMap = true,
-            latLng = currentLatLng,
-            markerTitle = currentLatLng?.let { "Vị trí hiện tại" }
-        ))
-        _ttsMessage.postValue("Đã dừng dẫn đường.")
-        Log.d("MainViewModel", "Map cleared and navigation stopped")
-    }
-
-    fun startCamera(context: Context, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
-        if (!checkCameraPermission(context)) {
-            _speechResult.setValue("request_camera_permission")
-            return
-        }
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setTargetResolution(android.util.Size(640, 480))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor) { imageProxy ->
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastAnalysisTime >= 1000) {
-                            if (isMoving) {
-                                val bitmap = imageProxy.toBitmap()
-                                detectObjects(bitmap)
-                            }
-                            lastAnalysisTime = currentTime
-                        }
-                        imageProxy.close()
-                    }
-                }
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
-                isCameraStarted = true
-                _ttsMessage.setValue("Bắt đầu phát hiện vật cản.")
-            } catch (e: Exception) {
-                Log.e("CameraX", "Lỗi camera: ${e.message}")
-                _ttsMessage.setValue("Lỗi khởi động camera.")
-            }
-        }, ContextCompat.getMainExecutor(context))
-    }
-
-    private fun stopCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(getApplication())
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            cameraProvider.unbindAll()
+            cameraExecutor.shutdown()
             isCameraStarted = false
-            _ttsMessage.setValue("Đã dừng phát hiện vật cản.")
-        }, ContextCompat.getMainExecutor(getApplication()))
+            Log.d(TAG, "Camera stopped at 09:37 AM +07, 15/09/2025")
+        }
     }
 
-    private fun ImageProxy.toBitmap(): Bitmap {
-        val yBuffer = planes[0].buffer
-        val uBuffer = planes[1].buffer
-        val vBuffer = planes[2].buffer
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-        val nv21 = ByteArray(ySize + uSize + vSize)
-        yBuffer.get(nv21, 0, ySize)
-        vBuffer.get(nv21, ySize, vSize)
-        uBuffer.get(nv21, ySize + vSize, uSize)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
-        val imageBytes = out.toByteArray()
-        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-    }
-
-    private fun detectObjects(bitmap: Bitmap) {
-        val options = ObjectDetectorOptions.Builder()
-            .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
-            .enableMultipleObjects()
-            .enableClassification()
-            .build()
-        val objectDetector = ObjectDetection.getClient(options)
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val obstacleLabels = listOf("car", "truck", "bus", "bicycle", "person", "tree", "pole", "fence", "wall", "barrier")
-        objectDetector.process(image)
-            .addOnSuccessListener { detectedObjects ->
-                var hasObstacle = false
-                for (obj in detectedObjects) {
-                    val label = obj.labels.firstOrNull()?.text?.lowercase() ?: "Không xác định"
-                    if (label in obstacleLabels) {
-                        hasObstacle = true
-                        val boundingBox = obj.boundingBox
-                        val boxArea = boundingBox.width() * boundingBox.height()
-                        val imageArea = bitmap.width * bitmap.height
-                        val isClose = boxArea > 0.3 * imageArea
-                        _ttsMessage.setValue(
-                            if (isClose) {
-                                "Cảnh báo: $label ở gần phía trước. Hãy cẩn thận!"
-                            } else {
-                                "Phát hiện $label phía trước."
-                            }
-                        )
-                    }
-                }
-                if (!hasObstacle) {
-                    _ttsMessage.setValue("Không phát hiện vật cản phía trước.")
-                }
-            }
-            .addOnFailureListener { e ->
-                Log.e("MLKit", "Lỗi phát hiện đối tượng: ${e.message}")
-                _ttsMessage.setValue("Lỗi: Không thể phát hiện vật thể. Vui lòng thử lại.")
-            }
-    }
-
-    fun getCoordinatesFromAddress(address: String) {
-        val encodedAddress = address.replace(" ", "+")
-        val url = "https://maps.track-asia.com/api/v2/geocode/json?address=$encodedAddress&key=public_key"
-        val request = Request.Builder().url(url).build()
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                _ttsMessage.postValue("Không thể tìm vị trí. Vui lòng thử lại.")
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.body?.string()?.let { jsonString ->
-                    val json = JSONObject(jsonString)
-                    if (json.getString("status") == "OK") {
-                        val location = json.getJSONArray("results")
-                            .getJSONObject(0)
-                            .getJSONObject("geometry")
-                            .getJSONObject("location")
-                        val lat = location.getDouble("lat")
-                        val lng = location.getDouble("lng")
-                        val destLatLng = LatLng(lat, lng)
-                        _mapUpdate.postValue(MapUpdate(clearMap = true))
-                        _mapUpdate.postValue(MapUpdate(latLng = currentLatLng, markerTitle = "Vị trí hiện tại"))
-                        _mapUpdate.postValue(MapUpdate(latLng = destLatLng, markerTitle = "Đích đến: $address"))
-                        _ttsMessage.postValue("Đã tìm thấy $address tại tọa độ $lat, $lng. Bắt đầu tìm đường.")
-                        getDirections(currentLatLng!!, destLatLng)
-                    } else {
-                        _ttsMessage.postValue("Không tìm thấy địa chỉ. Vui lòng thử lại.")
-                    }
-                }
-            }
-        })
-    }
-
-    fun getDirections(origin: LatLng, destination: LatLng) {
-        val url = "https://maps.track-asia.com/route/v2/directions/json?" +
-                "origin=${origin.latitude},${origin.longitude}" +
-                "&destination=${destination.latitude},${destination.longitude}" +
-                "&mode=walking" +
-                "&language=vi" +
-                "&key=public_key"
-        val request = Request.Builder().url(url).build()
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                _ttsMessage.postValue("Lỗi tìm đường. Vui lòng thử lại.")
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.body?.string()?.let { jsonString ->
-                    val json = JSONObject(jsonString)
-                    if (json.getString("status") == "OK") {
-                        _mapUpdate.postValue(MapUpdate(clearMap = true))
-                        _mapUpdate.postValue(MapUpdate(latLng = origin, markerTitle = "Vị trí hiện tại"))
-                        _mapUpdate.postValue(MapUpdate(latLng = destination, markerTitle = "Đích đến"))
-                        val routes = json.getJSONArray("routes")
-                        val overviewPolyline = routes.getJSONObject(0).getJSONObject("overview_polyline").getString("points")
-                        val points = decodePolyline(overviewPolyline)
-                        val legs = routes.getJSONObject(0).getJSONArray("legs")
-                        navigationSteps = legs.getJSONObject(0).getJSONArray("steps") // Lưu trữ steps
-                        _mapUpdate.postValue(MapUpdate(polylinePoints = points))
-                        _ttsMessage.postValue("Đã vẽ đường đi đến đích. Nhấn 'Bắt đầu dẫn đường' để tiếp tục.")
-                        _isNavigating.postValue(true) // Sử dụng postValue thay vì setValue
-                    } else {
-                        _ttsMessage.postValue("Không tìm thấy đường đi.")
-                    }
-                }
-            }
-        })
+    fun ttTranslation(message: String) {
+        tts.speak(message, TextToSpeech.QUEUE_ADD, null, null)
+        Log.d(TAG, "TTS speaking: $message at 09:37 AM +07, 15/09/2025")
     }
 
     private fun decodePolyline(encoded: String): List<LatLng> {
@@ -489,10 +317,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale("vi_VN"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e("TTS", "Ngôn ngữ không hỗ trợ")
+                Log.e(TAG, "Language not supported at 09:37 AM +07, 15/09/2025")
             } else {
-                _ttsMessage.setValue("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.")
+                _ttsMessage.postValue("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.")
             }
+        } else {
+            Log.e(TAG, "TTS initialization failed at 09:37 AM +07, 15/09/2025")
         }
     }
 
@@ -505,6 +335,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
         stopCamera()
+        Log.d(TAG, "ViewModel cleared at 09:37 AM +07, 15/09/2025")
         super.onCleared()
     }
 }
+
