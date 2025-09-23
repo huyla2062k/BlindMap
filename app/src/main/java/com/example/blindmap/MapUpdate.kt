@@ -8,5 +8,5 @@ data class MapUpdate(
     val markerTitle: String? = null,
     val polylinePoints: List<LatLng>? = null,
     val clearMap: Boolean = false,
-    val polylineOptions: PolylineOptions? = null // Thêm để hỗ trợ vẽ đường đi
+    val polylineOptions: PolylineOptions? = null
 )

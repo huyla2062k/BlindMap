@@ -127,7 +127,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
         if (!results.isNullOrEmpty()) {
             val spokenText = results[0].lowercase(Locale("vi_VN"))
-            Log.d(TAG, "handleSpeechResult: $spokenText, state: $speechState at 08:43 PM +07, 22/09/2025")
+            Log.d(TAG, "handleSpeechResult: $spokenText, state: $speechState")
             when (speechState) {
                 SpeechState.WAITING_FOR_ADDRESS -> {
                     pendingAddress = spokenText
@@ -160,7 +160,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     fun getCoordinatesFromAddress(address: String) {
         val encodedAddress = address.replace(" ", "+")
-        Log.d(TAG, "getCoordinatesFromAddress: $encodedAddress at 08:43 PM +07, 22/09/2025")
+        Log.d(TAG, "getCoordinatesFromAddress: $encodedAddress ")
         // Use TrackAsia API as per Logcat (replace YOUR_TRACKASIA_KEY with valid key)
         val url = "https://maps.track-asia.com/api/v2/geocode/json?address=$encodedAddress&key=public_key"
         // Alternative: Google Maps API
@@ -168,7 +168,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Failed to get coordinates: ${e.message} at 08:43 PM +07, 22/09/2025")
+                Log.e(TAG, "Failed to get coordinates: ${e.message} ")
                 _ttsMessage.postValue("Không tìm thấy địa chỉ.")
                 speechState = SpeechState.WAITING_FOR_ADDRESS
                 destination = null
@@ -184,7 +184,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                             .getJSONObject("geometry")
                             .getJSONObject("location")
                         destination = LatLng(location.getDouble("lat"), location.getDouble("lng"))
-                        Log.d(TAG, "onResponse: lat/lng: (${destination?.latitude},${destination?.longitude}) at 08:43 PM +07, 22/09/2025")
+                        Log.d(TAG, "onResponse: lat/lng: (${destination?.latitude},${destination?.longitude}) ")
                         _mapUpdate.postValue(MapUpdate(latLng = destination, markerTitle = pendingAddress))
                         _ttsMessage.postValue("Bạn muốn đến $pendingAddress? Nói 'có' hoặc 'không'.")
                     } else {
@@ -208,11 +208,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 "&key=public_key"
         // Alternative: Google Maps API
         // val url = "https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&mode=walking&language=vi&key=YOUR_GOOGLE_API_KEY"
-        Log.d(TAG, "getDirections: $url at 08:43 PM +07, 22/09/2025")
+        Log.d(TAG, "getDirections: $url ")
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Failed to get directions: ${e.message} at 08:43 PM +07, 22/09/2025")
+                Log.e(TAG, "Failed to get directions: ${e.message} ")
                 _ttsMessage.postValue("Lỗi tìm đường. Vui lòng thử lại.")
             }
 
@@ -304,9 +304,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 try {
                     cameraProvider.unbindAll()
                     cameraProvider.bindToLifecycle(activity, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalyzer)
-                    Log.d(TAG, "Camera started at 08:43 PM +07, 22/09/2025")
+                    Log.d(TAG, "Camera started ")
                 } catch (exc: Exception) {
-                    Log.e(TAG, "Camera failed to start: ${exc.message} at 08:43 PM +07, 22/09/2025")
+                    Log.e(TAG, "Camera failed to start: ${exc.message}")
                     _ttsMessage.postValue("Lỗi khi khởi động camera")
                 }
             }, ContextCompat.getMainExecutor(context))
@@ -326,7 +326,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     handleObjects(objects)
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "Object detection failed: ${e.message} at 08:43 PM +07, 22/09/2025")
+                    Log.e(TAG, "Object detection failed: ${e.message} ")
                     _ttsMessage.postValue("Lỗi khi nhận diện vật cản")
                 }
         }
@@ -384,7 +384,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 priority = LocationRequest.PRIORITY_HIGH_ACCURACY
             }
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-            Log.d(TAG, "Location updates started at 08:43 PM +07, 22/09/2025")
+            Log.d(TAG, "Location updates started ")
         }
     }
 
@@ -393,7 +393,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 location?.let {
                     _mapUpdate.postValue(MapUpdate(latLng = LatLng(it.latitude, it.longitude)))
-                    Log.d(TAG, "Current location: ${it.latitude}, ${it.longitude} at 08:43 PM +07, 22/09/2025")
+                    Log.d(TAG, "Current location: ${it.latitude}, ${it.longitude} ")
                 }
             }
         }
@@ -429,14 +429,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (isCameraStarted) {
             cameraExecutor.shutdown()
             isCameraStarted = false
-            Log.d(TAG, "Camera stopped at 08:43 PM +07, 22/09/2025")
+            Log.d(TAG, "Camera stopped ")
         }
     }
 
     fun ttTranslation(message: String) {
         speechRecognizer.stopListening()
         tts.speak(message, TextToSpeech.QUEUE_ADD, null, null)
-        Log.d(TAG, "TTS speaking: $message at 08:43 PM +07, 22/09/2025")
+        Log.d(TAG, "TTS speaking: $message ")
     }
 
     private fun decodePolyline(encoded: String): List<LatLng> {
@@ -475,13 +475,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale("vi_VN"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e(TAG, "Language not supported at 08:43 PM +07, 22/09/2025")
+                Log.e(TAG, "Language not supported ")
                 _ttsMessage.postValue("Ngôn ngữ không hỗ trợ.")
             } else {
                 _ttsMessage.postValue("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.")
             }
         } else {
-            Log.e(TAG, "TTS initialization failed at 08:43 PM +07, 22/09/2025")
+            Log.e(TAG, "TTS initialization failed")
             _ttsMessage.postValue("Khởi tạo giọng nói thất bại.")
         }
     }
@@ -495,7 +495,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
         stopCamera()
-        Log.d(TAG, "ViewModel cleared at 08:43 PM +07, 22/09/2025")
+        Log.d(TAG, "ViewModel cleared ")
         super.onCleared()
     }
 }
