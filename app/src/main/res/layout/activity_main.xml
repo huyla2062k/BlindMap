@@ -14,7 +14,7 @@
             app:layout_constraintBottom_toTopOf="@+id/ll_bottom"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <SurfaceView
+        <androidx.camera.view.PreviewView
             android:id="@+id/camera_preview"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
