@@ -76,7 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private var speechState: SpeechState = SpeechState.WAITING_FOR_ADDRESS
     private val traveledPath = mutableListOf<LatLng>() // Lưu đường đã đi qua
     private var lastTtsTime = 0L // Thời gian phát TTS lần cuối
-    private val ttsMinInterval = 1000L
+    private val ttsMinInterval = 3000L // Khoảng cách tối thiểu giữa các thông báo TTS (3 giây)
     private var isTtsBusy = false // Trạng thái TTS đang phát
     private var lastAnnouncedStep = -1 // Bước cuối cùng đã thông báo
 
@@ -229,13 +229,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     fun getDirections(origin: LatLng, destination: LatLng) {
+
         val url = "https://maps.track-asia.com/route/v2/directions/json?" +
                 "origin=${origin.latitude},${origin.longitude}" +
                 "&destination=${destination.latitude},${destination.longitude}" +
                 "&mode=walking" +  // Chế độ đi bộ
                 "&language=vi" +   // Ngôn ngữ tiếng Việt để text phù hợp
                 "&key=public_key"
-
         Log.d(TAG, "getDirections: $url at 09:00 PM +07, 02/10/2025")
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
@@ -350,7 +350,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         lastAnnouncedStep = currentStepIndex
                         Log.d(TAG, "Reverted to step $currentStepIndex at 09:00 PM +07, 02/10/2025")
                         announceCurrentStep()
+                    } else {
+
                     }
+                } else {
+
                 }
             } else {
                 Log.d(TAG, "Current step index ($currentStepIndex) exceeds steps length (${steps.length()}) at 09:00 PM +07, 02/10/2025")
@@ -394,6 +398,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "navigation")
                 Log.d(TAG, "Announced: $message at 09:00 PM +07, 02/10/2025")
                 _mapUpdate.postValue(MapUpdate(clearMap = true))
+            } else {
+
             }
         }
     }
@@ -468,7 +474,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     handleObjects(objects)
                 }
                 .addOnFailureListener { e ->
-
+                    Log.e(TAG, "Object detection failed: ${e.message} at 09:00 PM +07, 02/10/2025")
+//                    _ttsMessage.postValue("Lỗi khi nhận diện vật cản")
                 }
         }
         imageProxy.close()
@@ -481,10 +488,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
             if (objects.isEmpty()) {
                 if (lastDetectedObject != null) {
-
+//                    val message = "Không phát hiện vật cản."
+//                    _ttsMessage.postValue(message)
+//                    tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "obstacle")
+//                    lastDetectedObject = null
+//                    Log.d(TAG, "Announced: $message at 09:00 PM +07, 02/10/2025")
                 }
             } else {
-                val primaryObject = objects[0].labels.firstOrNull()?.text ?: "vật cản không xác định"
+                val primaryObject = objects[0].labels.firstOrNull()?.text ?: "Không xác định"
                 if (primaryObject != lastDetectedObject) {
                     val message = "Cảnh báo: $primaryObject ở gần!"
                     _ttsMessage.postValue(message)
