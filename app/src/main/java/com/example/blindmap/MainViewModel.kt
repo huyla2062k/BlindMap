@@ -16,6 +16,7 @@ import android.os.Looper
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
@@ -49,6 +50,7 @@ import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.system.measureTimeMillis
 
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
     private val TAG = this::class.java.simpleName
@@ -73,6 +75,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _isActivelyNavigating = MutableLiveData<Boolean>(false)
     private var speechState: SpeechState = SpeechState.WAITING_FOR_ADDRESS
     private val traveledPath = mutableListOf<LatLng>() // Lưu đường đã đi qua
+    private var lastTtsTime = 0L // Thời gian phát TTS lần cuối
+    private val ttsMinInterval = 1000L
+    private var isTtsBusy = false // Trạng thái TTS đang phát
+    private var lastAnnouncedStep = -1 // Bước cuối cùng đã thông báo
 
     enum class SpeechState {
         WAITING_FOR_ADDRESS,
@@ -89,6 +95,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     init {
         cameraExecutor = Executors.newSingleThreadExecutor()
         setupLocationCallback()
+        setupTtsListener()
+    }
+
+    private fun setupTtsListener() {
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                isTtsBusy = true
+                Log.d(TAG, "TTS started at 09:00 PM +07, 02/10/2025")
+            }
+
+            override fun onDone(utteranceId: String?) {
+                isTtsBusy = false
+                lastTtsTime = System.currentTimeMillis()
+                Log.d(TAG, "TTS completed at 09:00 PM +07, 02/10/2025")
+            }
+
+            override fun onError(utteranceId: String?) {
+                isTtsBusy = false
+                Log.e(TAG, "TTS error at 09:00 PM +07, 02/10/2025")
+            }
+        })
     }
 
     private fun setupLocationCallback() {
@@ -96,10 +123,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
                     val currentLatLng = LatLng(location.latitude, location.longitude)
-                    traveledPath.add(currentLatLng) // Thêm vị trí hiện tại vào đường đã đi
+                    traveledPath.add(currentLatLng)
                     _mapUpdate.postValue(MapUpdate(latLng = currentLatLng))
-                    checkCurrentStep(location) // Cập nhật bước thực tế với hướng dẫn chi tiết
-                    updateRemainingRoute(currentLatLng) // Cập nhật tuyến đường còn lại
+                    checkCurrentStep(location)
+                    updateRemainingRoute(currentLatLng)
                     checkDestinationReached(location)
                 }
             }
@@ -133,7 +160,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
         if (!results.isNullOrEmpty()) {
             val spokenText = results[0].lowercase(Locale("vi_VN"))
-            Log.d(TAG, "handleSpeechResult: $spokenText, state: $speechState  ")
+            Log.d(TAG, "handleSpeechResult: $spokenText, state: $speechState at 09:00 PM +07, 02/10/2025")
             when (speechState) {
                 SpeechState.WAITING_FOR_ADDRESS -> {
                     pendingAddress = spokenText
@@ -166,12 +193,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     fun getCoordinatesFromAddress(address: String) {
         val encodedAddress = address.replace(" ", "+")
-        Log.d(TAG, "getCoordinatesFromAddress: $encodedAddress  ")
+        Log.d(TAG, "getCoordinatesFromAddress: $encodedAddress at 09:00 PM +07, 02/10/2025")
         val url = "https://maps.track-asia.com/api/v2/geocode/json?address=$encodedAddress&key=public_key"
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Failed to get coordinates: ${e.message}  ")
+                Log.e(TAG, "Failed to get coordinates: ${e.message} at 09:00 PM +07, 02/10/2025")
                 _ttsMessage.postValue("Không tìm thấy địa chỉ.")
                 speechState = SpeechState.WAITING_FOR_ADDRESS
                 destination = null
@@ -187,7 +214,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                             .getJSONObject("geometry")
                             .getJSONObject("location")
                         destination = LatLng(location.getDouble("lat"), location.getDouble("lng"))
-                        Log.d(TAG, "onResponse: lat/lng: (${destination?.latitude},${destination?.longitude})  ")
+                        Log.d(TAG, "onResponse: lat/lng: (${destination?.latitude},${destination?.longitude}) at 09:00 PM +07, 02/10/2025")
                         _mapUpdate.postValue(MapUpdate(latLng = destination, markerTitle = pendingAddress))
                         _ttsMessage.postValue("Bạn muốn đến $pendingAddress? Nói 'có' hoặc 'không'.")
                     } else {
@@ -208,11 +235,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 "&mode=walking" +  // Chế độ đi bộ
                 "&language=vi" +   // Ngôn ngữ tiếng Việt để text phù hợp
                 "&key=public_key"
-        Log.d(TAG, "getDirections: $url  ")
+
+        Log.d(TAG, "getDirections: $url at 09:00 PM +07, 02/10/2025")
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Failed to get directions: ${e.message}  ")
+                Log.e(TAG, "Failed to get directions: ${e.message} at 09:00 PM +07, 02/10/2025")
                 _ttsMessage.postValue("Lỗi tìm đường. Vui lòng thử lại.")
             }
 
@@ -226,8 +254,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         val legs = routes.getJSONObject(0).getJSONArray("legs")
                         navigationSteps = legs.getJSONObject(0).getJSONArray("steps")
                         currentStepIndex = 0
-                        Log.d(TAG, "Navigation steps loaded: ${navigationSteps?.length()} steps  ")
-                        updateRemainingRoute(points[0]) // Bắt đầu với điểm đầu tiên
+                        lastAnnouncedStep = -1
+                        Log.d(TAG, "Navigation steps: $navigationSteps at 09:00 PM +07, 02/10/2025")
+                        updateRemainingRoute(points[0])
                     } else {
                         _ttsMessage.postValue("Không tìm thấy đường đi.")
                     }
@@ -237,55 +266,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     private fun updateRemainingRoute(currentPosition: LatLng) {
-        navigationSteps?.let { steps ->
-            if (steps.length() > 0 && currentStepIndex < steps.length()) {
-                val remainingPoints = mutableListOf<LatLng>()
-                var startNewSegment = false
-                for (i in currentStepIndex until steps.length()) {
-                    val step = steps.getJSONObject(i)
-                    val startLocation = LatLng(
-                        step.getJSONObject("start_location").getDouble("lat"),
-                        step.getJSONObject("start_location").getDouble("lng")
-                    )
-                    val endLocation = LatLng(
-                        step.getJSONObject("end_location").getDouble("lat"),
-                        step.getJSONObject("end_location").getDouble("lng")
-                    )
-                    if (!startNewSegment && isLocationClose(currentPosition, startLocation, 10.0)) {
-                        startNewSegment = true
-                        currentStepIndex = i
-                        Log.d(TAG, "Starting new segment at step $currentStepIndex  ")
+        val timeTaken = measureTimeMillis {
+            navigationSteps?.let { steps ->
+                if (steps.length() > 0 && currentStepIndex < steps.length()) {
+                    val remainingPoints = mutableListOf<LatLng>()
+                    var startNewSegment = false
+                    for (i in currentStepIndex until steps.length()) {
+                        val step = steps.getJSONObject(i)
+                        val startLocation = LatLng(
+                            step.getJSONObject("start_location").getDouble("lat"),
+                            step.getJSONObject("start_location").getDouble("lng")
+                        )
+                        val endLocation = LatLng(
+                            step.getJSONObject("end_location").getDouble("lat"),
+                            step.getJSONObject("end_location").getDouble("lng")
+                        )
+                        Log.d(TAG, "Step $i: Start $startLocation, End $endLocation at 09:00 PM +07, 02/10/2025")
+                        if (!startNewSegment && isLocationClose(currentPosition, startLocation, 10.0)) {
+                            startNewSegment = true
+                            currentStepIndex = i
+                            Log.d(TAG, "Starting new segment at step $currentStepIndex at 09:00 PM +07, 02/10/2025")
+                        }
+                        if (startNewSegment) {
+                            remainingPoints.add(endLocation)
+                        }
                     }
-                    if (startNewSegment) {
-                        remainingPoints.add(endLocation)
+                    if (remainingPoints.isNotEmpty()) {
+                        _mapUpdate.postValue(MapUpdate(
+                            polylineOptions = PolylineOptions()
+                                .add(currentPosition) // Bắt đầu từ vị trí hiện tại
+                                .addAll(remainingPoints) // Thêm các điểm còn lại
+                                .width(10f)
+                                .color(Color.BLUE)
+                        ))
+                        Log.d(TAG, "Drawn route from $currentPosition to ${remainingPoints.last()} at 09:00 PM +07, 02/10/2025")
+                    } else if (currentStepIndex >= steps.length() - 1) {
+                        Log.d(TAG, "Reached or passed last step, clearing map at 09:00 PM +07, 02/10/2025")
+                        _mapUpdate.postValue(MapUpdate(clearMap = true))
+                    } else {
+                        Log.w(TAG, "Warning: remainingPoints is empty but not at destination at 09:00 PM +07, 02/10/2025")
                     }
-                }
-                if (remainingPoints.isNotEmpty()) {
-                    _mapUpdate.postValue(MapUpdate(
-                        polylineOptions = PolylineOptions()
-                            .add(currentPosition) // Bắt đầu từ vị trí hiện tại
-                            .addAll(remainingPoints)
-                            .width(10f)
-                            .color(Color.BLUE)
-                    ))
-                    announceCurrentStep()
-                } else if (currentStepIndex >= steps.length() - 1) {
-                    Log.d(TAG, "Reached or passed last step, clearing map  ")
-                    _mapUpdate.postValue(MapUpdate(clearMap = true)) // Xóa khi đến đích
                 } else {
-                    Log.w(TAG, "Warning: remainingPoints is empty but not at destination  ")
+                    Log.d(TAG, "No steps or index out of bounds, clearing map at 09:00 PM +07, 02/10/2025")
+                    _mapUpdate.postValue(MapUpdate(clearMap = true))
                 }
-            } else {
-                Log.d(TAG, "No steps or index out of bounds, clearing map  ")
-                _mapUpdate.postValue(MapUpdate(clearMap = true)) // Xóa nếu không còn bước
             }
         }
+        Log.d(TAG, "updateRemainingRoute took ${timeTaken}ms at 09:00 PM +07, 02/10/2025")
     }
 
     private fun isLocationClose(location1: LatLng, location2: LatLng, threshold: Double): Boolean {
         val results = FloatArray(1)
         Location.distanceBetween(location1.latitude, location1.longitude, location2.latitude, location2.longitude, results)
-        return results[0] < threshold // Độ chính xác 10 mét
+        Log.d(TAG, "Distance between $location1 and $location2 is ${results[0]}m at 09:00 PM +07, 02/10/2025")
+        return results[0] < threshold
     }
 
     private fun checkCurrentStep(location: Location) {
@@ -303,22 +337,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 val currentLatLng = LatLng(location.latitude, location.longitude)
                 val distanceToEnd = FloatArray(1)
                 Location.distanceBetween(location.latitude, location.longitude, endLocation.latitude, endLocation.longitude, distanceToEnd)
+                Log.d(TAG, "Current step $currentStepIndex: Distance to end $endLocation is ${distanceToEnd[0]}m at 09:00 PM +07, 02/10/2025")
 
-                // Cập nhật hướng dẫn chi tiết dựa trên khoảng cách
-                if (distanceToEnd[0] <= 50) { // Thông báo khi còn 50 mét
-                    announceDetailedTurn(currentLatLng, currentStep)
-                }
-                if (distanceToEnd[0] < 10) { // Chuyển bước khi đến gần điểm kết thúc
+                if (distanceToEnd[0] < 10 && currentStepIndex != lastAnnouncedStep) {
                     currentStepIndex++
-                    Log.d(TAG, "Moved to step $currentStepIndex  ")
+                    lastAnnouncedStep = currentStepIndex - 1
+                    Log.d(TAG, "Near turn, moved to step $currentStepIndex at 09:00 PM +07, 02/10/2025")
                     announceCurrentStep()
-                } else if (distanceToStart(currentLatLng, startLocation) > 20 && currentStepIndex > 0) { // Quay lại bước trước
+                } else if (distanceToStart(currentLatLng, startLocation) > 20 && currentStepIndex > 0) {
                     currentStepIndex--
-                    Log.d(TAG, "Reverted to step $currentStepIndex  ")
-                    announceCurrentStep()
+                    if (currentStepIndex != lastAnnouncedStep) {
+                        lastAnnouncedStep = currentStepIndex
+                        Log.d(TAG, "Reverted to step $currentStepIndex at 09:00 PM +07, 02/10/2025")
+                        announceCurrentStep()
+                    }
                 }
             } else {
-                Log.d(TAG, "Current step index ($currentStepIndex) exceeds steps length (${steps.length()})  ")
+                Log.d(TAG, "Current step index ($currentStepIndex) exceeds steps length (${steps.length()}) at 09:00 PM +07, 02/10/2025")
             }
         }
     }
@@ -326,32 +361,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private fun distanceToStart(current: LatLng, start: LatLng): Float {
         val results = FloatArray(1)
         Location.distanceBetween(current.latitude, current.longitude, start.latitude, start.longitude, results)
+        Log.d(TAG, "Distance to start $start from $current is ${results[0]}m at 09:00 PM +07, 02/10/2025")
         return results[0]
     }
 
-    private fun announceDetailedTurn(currentPosition: LatLng, step: JSONObject) {
-        val endLocation = LatLng(
-            step.getJSONObject("end_location").getDouble("lat"),
-            step.getJSONObject("end_location").getDouble("lng")
-        )
-        val distance = FloatArray(1)
-        Location.distanceBetween(currentPosition.latitude, currentPosition.longitude, endLocation.latitude, endLocation.longitude, distance)
-        val maneuver = if (step.has("maneuver")) step.getString("maneuver") else ""
-        val maneuverText = when (maneuver) {
-            "turn-left" -> "Rẽ trái"
-            "turn-right" -> "Rẽ phải"
-            "keep-left" -> "Giữ bên trái"
-            "keep-right" -> "Giữ bên phải"
-            "straight" -> "Đi thẳng"
-            else -> "Tiếp tục đi"
-        }
-        val htmlInstructions = step.getString("html_instructions")
-        val cleanInstructions = android.text.Html.fromHtml(htmlInstructions).toString()
-        val distanceText = String.format("%.0f", distance[0]) // Làm tròn khoảng cách
-        _ttsMessage.postValue("$maneuverText $cleanInstructions sau $distanceText mét.")
-    }
-
     private fun announceCurrentStep() {
+        val currentTime = System.currentTimeMillis()
+        if (isTtsBusy || (currentTime - lastTtsTime) < ttsMinInterval) return
+
         navigationSteps?.let { steps ->
             if (currentStepIndex < steps.length()) {
                 val currentStep = steps.getJSONObject(currentStepIndex)
@@ -367,10 +384,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     "straight" -> "Đi thẳng"
                     else -> ""
                 }
-                _ttsMessage.postValue("Bước ${currentStepIndex + 1}: $maneuverText $cleanInstructions, cách $distanceText.")
+                val message = "Bước ${currentStepIndex + 1}: $maneuverText $cleanInstructions, cách $distanceText."
+                _ttsMessage.postValue(message)
+                tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "navigation")
+                Log.d(TAG, "Announced: $message at 09:00 PM +07, 02/10/2025")
             } else if (currentStepIndex == steps.length()) {
-                _mapUpdate.postValue(MapUpdate(clearMap = true)) // Xóa bản đồ khi đến đích
-                _ttsMessage.postValue("Đã đến đích cuối cùng.")
+                val message = "Đã đến đích cuối cùng."
+                _ttsMessage.postValue(message)
+                tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "navigation")
+                Log.d(TAG, "Announced: $message at 09:00 PM +07, 02/10/2025")
+                _mapUpdate.postValue(MapUpdate(clearMap = true))
             }
         }
     }
@@ -378,6 +401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun startActiveNavigation(steps: JSONArray) {
         navigationSteps = steps
         currentStepIndex = 0
+        lastAnnouncedStep = -1
         _isActivelyNavigating.postValue(true)
         _navigationButtonText.postValue("Dừng dẫn đường")
         startLocationUpdates()
@@ -394,6 +418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         pendingAddress = null
         navigationSteps = null
         currentStepIndex = 0
+        lastAnnouncedStep = -1
         traveledPath.clear()
         speechState = SpeechState.WAITING_FOR_ADDRESS
         if (checkLocationPermission(getApplication())) {
@@ -421,9 +446,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 try {
                     cameraProvider.unbindAll()
                     cameraProvider.bindToLifecycle(activity, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalyzer)
-                    Log.d(TAG, "Camera started  ")
+                    Log.d(TAG, "Camera started at 09:00 PM +07, 02/10/2025")
                 } catch (exc: Exception) {
-                    Log.e(TAG, "Camera failed to start: ${exc.message}  ")
+                    Log.e(TAG, "Camera failed to start: ${exc.message} at 09:00 PM +07, 02/10/2025")
                     _ttsMessage.postValue("Lỗi khi khởi động camera")
                 }
             }, ContextCompat.getMainExecutor(context))
@@ -443,8 +468,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     handleObjects(objects)
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "Object detection failed: ${e.message}  ")
-                    _ttsMessage.postValue("Lỗi khi nhận diện vật cản")
+
                 }
         }
         imageProxy.close()
@@ -452,16 +476,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private fun handleObjects(objects: List<com.google.mlkit.vision.objects.DetectedObject>) {
         if (isNavigatingInternal) {
+            val currentTime = System.currentTimeMillis()
+            if (isTtsBusy || (currentTime - lastTtsTime) < ttsMinInterval) return
+
             if (objects.isEmpty()) {
                 if (lastDetectedObject != null) {
-//                    _ttsMessage.postValue("Không phát hiện vật cản.")
-                    lastDetectedObject = null
+
                 }
             } else {
-                val primaryObject = objects[0].labels.firstOrNull()?.text ?: "vật cản xác định"
+                val primaryObject = objects[0].labels.firstOrNull()?.text ?: "vật cản không xác định"
                 if (primaryObject != lastDetectedObject) {
-                    _ttsMessage.postValue("Cảnh báo: $primaryObject ở gần!")
+                    val message = "Cảnh báo: $primaryObject ở gần!"
+                    _ttsMessage.postValue(message)
+                    tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "obstacle")
                     lastDetectedObject = primaryObject
+                    Log.d(TAG, "Announced: $message at 09:00 PM +07, 02/10/2025")
                 }
             }
         }
@@ -478,7 +507,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         yBuffer.get(nv21, 0, ySize)
         vBuffer.get(nv21, ySize, vSize)
         uBuffer.get(nv21, ySize + vSize, uSize)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, height, height, null)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         val out = ByteArrayOutputStream()
         yuvImage.compressToJpeg(Rect(0, 0, yuvImage.width, yuvImage.height), 50, out)
         val imageBytes = out.toByteArray()
@@ -496,12 +525,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun startLocationUpdates() {
         if (checkLocationPermission(getApplication())) {
             val locationRequest = LocationRequest.create().apply {
-                interval = 2000 // Cập nhật vị trí mỗi 2 giây
-                fastestInterval = 1000 // Tần suất nhanh nhất mỗi 1 giây
+                interval = 1000
+                fastestInterval = 500
                 priority = LocationRequest.PRIORITY_HIGH_ACCURACY
             }
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-            Log.d(TAG, "Location updates started  ")
+            Log.d(TAG, "Location updates started at 09:00 PM +07, 02/10/2025")
         }
     }
 
@@ -510,7 +539,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 location?.let {
                     _mapUpdate.postValue(MapUpdate(latLng = LatLng(it.latitude, it.longitude)))
-                    Log.d(TAG, "Current location: ${it.latitude}, ${it.longitude}  ")
+                    Log.d(TAG, "Current location: ${it.latitude}, ${it.longitude} at 09:00 PM +07, 02/10/2025")
                 }
             }
         }
@@ -526,8 +555,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     val distance = FloatArray(1)
                     Location.distanceBetween(location.latitude, location.longitude, destLat, destLng, distance)
                     if (distance[0] < 10) {
-                        _ttsMessage.postValue("Đã đến đích.")
+                        val message = "Đã đến đích."
+                        _ttsMessage.postValue(message)
+                        tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "navigation")
                         stopNavigation()
+                        Log.d(TAG, "Announced: $message at 09:00 PM +07, 02/10/2025")
                     }
                 }
             }
@@ -546,14 +578,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (isCameraStarted) {
             cameraExecutor.shutdown()
             isCameraStarted = false
-            Log.d(TAG, "Camera stopped  ")
+            Log.d(TAG, "Camera stopped at 09:00 PM +07, 02/10/2025")
         }
     }
 
     fun ttTranslation(message: String) {
-        speechRecognizer.stopListening()
-        tts.speak(message, TextToSpeech.QUEUE_ADD, null, null)
-        Log.d(TAG, "TTS speaking: $message  ")
+        if (!isTtsBusy && (System.currentTimeMillis() - lastTtsTime) >= ttsMinInterval) {
+            _ttsMessage.postValue(message)
+            tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "translation")
+            Log.d(TAG, "TTS speaking: $message at 09:00 PM +07, 02/10/2025")
+        }
     }
 
     private fun decodePolyline(encoded: String): List<LatLng> {
@@ -585,6 +619,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             val latLng = LatLng((lat.toDouble() / 1E5), (lng.toDouble() / 1E5))
             poly.add(latLng)
         }
+        Log.d(TAG, "Decoded polyline with ${poly.size} points at 09:00 PM +07, 02/10/2025")
         return poly
     }
 
@@ -592,13 +627,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale("vi_VN"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e(TAG, "Language not supported  ")
+                Log.e(TAG, "Language not supported at 09:00 PM +07, 02/10/2025")
                 _ttsMessage.postValue("Ngôn ngữ không hỗ trợ.")
             } else {
                 _ttsMessage.postValue("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.")
             }
         } else {
-            Log.e(TAG, "TTS initialization failed  ")
+            Log.e(TAG, "TTS initialization failed at 09:00 PM +07, 02/10/2025")
             _ttsMessage.postValue("Khởi tạo giọng nói thất bại.")
         }
     }
@@ -612,7 +647,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
         stopCamera()
-        Log.d(TAG, "ViewModel cleared  ")
+        Log.d(TAG, "ViewModel cleared at 09:00 PM +07, 02/10/2025")
         super.onCleared()
     }
 }
