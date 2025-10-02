@@ -454,11 +454,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (isNavigatingInternal) {
             if (objects.isEmpty()) {
                 if (lastDetectedObject != null) {
-                    _ttsMessage.postValue("Không phát hiện vật cản.")
+//                    _ttsMessage.postValue("Không phát hiện vật cản.")
                     lastDetectedObject = null
                 }
             } else {
-                val primaryObject = objects[0].labels.firstOrNull()?.text ?: "Không xác định"
+                val primaryObject = objects[0].labels.firstOrNull()?.text ?: "vật cản xác định"
                 if (primaryObject != lastDetectedObject) {
                     _ttsMessage.postValue("Cảnh báo: $primaryObject ở gần!")
                     lastDetectedObject = primaryObject
