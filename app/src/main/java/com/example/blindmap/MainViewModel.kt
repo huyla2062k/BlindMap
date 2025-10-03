@@ -361,7 +361,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val cleanInstructions = android.text.Html.fromHtml(htmlInstructions).toString()
 
         // Làm tròn xuống bội số của 10
-        val roundedDistance = (distance[0] / 10).toInt() * 10
+        val roundedDistance = (distance[0] / 30).toInt() * 30
+        Log.d(TAG, "announceDetailedTurn: $roundedDistance")
 
         if (roundedDistance > 0 && roundedDistance != lastAnnouncedDistance) {
             lastAnnouncedDistance = roundedDistance
@@ -466,8 +467,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     handleObjects(objects)
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "Object detection failed: ${e.message} at 08:11 AM +07, 02/10/2025")
-                    _ttsMessage.postValue("Lỗi khi nhận diện vật cản")
+
                 }
         }
         imageProxy.close()
@@ -476,10 +476,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private fun handleObjects(objects: List<com.google.mlkit.vision.objects.DetectedObject>) {
         if (isNavigatingInternal) {
             if (objects.isEmpty()) {
-                if (lastDetectedObject != null) {
-                    _ttsMessage.postValue("Không phát hiện vật cản.")
-                    lastDetectedObject = null
-                }
+//                if (lastDetectedObject != null) {
+//                    _ttsMessage.postValue("Không phát hiện vật cản.")
+//                    lastDetectedObject = null
+//                }
             } else {
                 val primaryObject = objects[0].labels.firstOrNull()?.text ?: "Không xác định"
                 if (primaryObject != lastDetectedObject) {
@@ -618,7 +618,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 Log.e(TAG, "Language not supported at 08:11 AM +07, 02/10/2025")
                 _ttsMessage.postValue("Ngôn ngữ không hỗ trợ.")
             } else {
-                _ttsMessage.postValue("Ứng dụng sẵn sàng. Nói địa chỉ để tìm đường.")
+                _ttsMessage.postValue("Ứng dụng sẵn sàng. Bấm vào góc phải bên dưới để tìm địa chỉ, Bấm vào góc trái bên dưới để bắt đầu hoăc dừng dẫn đường.")
             }
         } else {
             Log.e(TAG, "TTS initialization failed at 08:11 AM +07, 02/10/2025")
